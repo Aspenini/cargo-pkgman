@@ -1,0 +1,31 @@
+[package]
+name = "cargo-pkgman"
+version = "0.1.0"
+edition = "2024"
+description = "Package-manager style frontends for Cargo-installed applications"
+license = "MIT"
+repository = "https://github.com/Aspenini/cargo-pkgman"
+
+[lib]
+name = "cargo_pkgman"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cargo-pm"
+path = "src/bin/cargo-pm.rs"
+
+[[bin]]
+name = "cargo-pacman"
+path = "src/bin/cargo-pacman.rs"
+
+[[bin]]
+name = "cargo-apt"
+path = "src/bin/cargo-apt.rs"
+
+[[bin]]
+name = "cargo-pkg"
+path = "src/bin/cargo-pkg.rs"
+
+[[bin]]
+name = "cargo-dnf"
+path = "src/bin/cargo-dnf.rs"

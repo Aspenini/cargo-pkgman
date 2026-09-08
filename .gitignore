@@ -1,0 +1,28 @@
+```gitignore
+/target/
+
+# Rust tooling
+Cargo.lock
+
+# IDEs / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local config / env
+.env
+.env.*
+!.env.example
+
+# Temp files
+*.tmp
+*.bak
+```
