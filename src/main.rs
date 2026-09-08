@@ -1,4 +1,5 @@
 mod backend;
+mod registry;
 
 use std::{
     env,
@@ -396,23 +397,11 @@ fn run_cargo(arguments: &[&str]) -> Result<(), String> {
 
 fn list_packages() -> Result<(), String> {
     /*
-     * Use cargo-update's parser instead of spawning
+     * Read Cargo's own .crates.toml instead of spawning
      * `cargo install --list`.
      */
-    let mut packages = backend::installed_packages()?;
-
-    packages.sort_by(|a, b| a.name.cmp(&b.name));
-
-    for package in packages {
-        match package.version {
-            Some(version) => {
-                println!("{} {}", package.name, version);
-            }
-
-            None => {
-                println!("{}", package.name);
-            }
-        }
+    for package in backend::installed_packages()? {
+        println!("{} {}", package.name, package.version);
     }
 
     Ok(())

@@ -7,8 +7,11 @@ description = "Package-manager style frontends for Cargo-installed applications"
 license = "MIT"
 
 [dependencies]
-cargo-update = "=22.1.1"
-home = "=0.5.9"
+home = "0.5"
+semver = "1"
+serde_json = "1"
+toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
+ureq = "3"
 
 # The shared executable. Every frontend below is a launcher that
 # re-invokes this one with `--frontend <name>`, so the package
