@@ -1,5 +1,8 @@
 use std::process::ExitCode;
 
+#[path = "../launcher.rs"]
+mod launcher;
+
 fn main() -> ExitCode {
-    cargo_pkgman::run(cargo_pkgman::Dialect::Pkg)
+    launcher::launch("pkg")
 }

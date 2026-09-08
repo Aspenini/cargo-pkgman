@@ -10,9 +10,12 @@ license = "MIT"
 cargo-update = "=22.1.1"
 home = "=0.5.9"
 
-[lib]
-name = "cargo_pkgman"
-path = "src/lib.rs"
+# The shared executable. Every frontend below is a launcher that
+# re-invokes this one with `--frontend <name>`, so the package
+# management logic and its dependencies are linked exactly once.
+[[bin]]
+name = "cargo-pkgman"
+path = "src/main.rs"
 
 [[bin]]
 name = "cargo-pm"

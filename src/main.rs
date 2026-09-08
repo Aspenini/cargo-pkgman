@@ -5,13 +5,49 @@ use std::{
     process::{Command, ExitCode},
 };
 
+/*
+ * All package-management logic lives in this single executable.
+ *
+ * The cargo-pacman, cargo-apt, cargo-pkg, cargo-dnf and cargo-pm
+ * binaries are tiny launchers that re-invoke this program with
+ * `--frontend <name>` instead of statically linking a second copy of
+ * the registry and update machinery.
+ */
 #[derive(Debug, Clone, Copy)]
-pub enum Dialect {
+enum Dialect {
     Native,
     Pacman,
     Apt,
     Pkg,
     Dnf,
+}
+
+impl Dialect {
+    /*
+     * The name a launcher passes to --frontend, which is also the Cargo
+     * subcommand that frontend is invoked as.
+     */
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "pm" => Some(Self::Native),
+            "pacman" => Some(Self::Pacman),
+            "apt" => Some(Self::Apt),
+            "pkg" => Some(Self::Pkg),
+            "dnf" => Some(Self::Dnf),
+
+            _ => None,
+        }
+    }
+
+    fn subcommand(self) -> &'static str {
+        match self {
+            Self::Native => "pm",
+            Self::Pacman => "pacman",
+            Self::Apt => "apt",
+            Self::Pkg => "pkg",
+            Self::Dnf => "dnf",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -29,27 +65,40 @@ enum Operation {
     Help,
 }
 
-pub fn run(dialect: Dialect) -> ExitCode {
+fn main() -> ExitCode {
     let mut args: Vec<String> = env::args().skip(1).collect();
 
     /*
      * Cargo external subcommands can pass the subcommand itself.
      *
-     * cargo apt upgrade
+     * cargo pkgman list
      *
      * may invoke:
      *
-     * cargo-apt apt upgrade
+     * cargo-pkgman pkgman list
      */
-    let subcommand = match dialect {
-        Dialect::Native => "pm",
-        Dialect::Pacman => "pacman",
-        Dialect::Apt => "apt",
-        Dialect::Pkg => "pkg",
-        Dialect::Dnf => "dnf",
+    if args.first().map(String::as_str) == Some("pkgman") {
+        args.remove(0);
+    }
+
+    let dialect = match take_frontend(&mut args) {
+        Ok(dialect) => dialect,
+
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
     };
 
-    if args.first().map(String::as_str) == Some(subcommand) {
+    /*
+     * A launcher forwards its own arguments verbatim, so the frontend
+     * subcommand can still be leading:
+     *
+     * cargo apt upgrade
+     *   -> cargo-apt apt upgrade
+     *   -> cargo-pkgman --frontend apt -- apt upgrade
+     */
+    if args.first().map(String::as_str) == Some(dialect.subcommand()) {
         args.remove(0);
     }
 
@@ -66,7 +115,7 @@ pub fn run(dialect: Dialect) -> ExitCode {
         }
     };
 
-    match execute(operation) {
+    match execute(dialect, operation) {
         Ok(()) => ExitCode::SUCCESS,
 
         Err(error) => {
@@ -74,6 +123,42 @@ pub fn run(dialect: Dialect) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/*
+ * Take a leading `--frontend <name>` or `--frontend=<name>` along with
+ * the `--` separator that follows it.
+ *
+ * Running cargo-pkgman without one behaves like the native frontend.
+ */
+fn take_frontend(args: &mut Vec<String>) -> Result<Dialect, String> {
+    const FLAG: &str = "--frontend";
+
+    let name = match args.first().map(String::as_str) {
+        Some(FLAG) => {
+            let Some(name) = args.get(1).cloned() else {
+                return Err(format!("{FLAG} requires a frontend name"));
+            };
+
+            args.drain(..2);
+            name
+        }
+
+        Some(argument) if argument.starts_with("--frontend=") => {
+            let name = argument[FLAG.len() + 1..].to_string();
+
+            args.remove(0);
+            name
+        }
+
+        _ => return Ok(Dialect::Native),
+    };
+
+    if args.first().map(String::as_str) == Some("--") {
+        args.remove(0);
+    }
+
+    Dialect::from_name(&name).ok_or_else(|| format!("unknown frontend '{name}'"))
 }
 
 fn parse(dialect: Dialect, args: &[String]) -> Result<Operation, String> {
@@ -257,7 +342,7 @@ where
     Ok(make(args[1..].join(" ")))
 }
 
-fn execute(operation: Operation) -> Result<(), String> {
+fn execute(dialect: Dialect, operation: Operation) -> Result<(), String> {
     match operation {
         Operation::Install(packages) => run_package_command("install", &packages),
 
@@ -274,7 +359,7 @@ fn execute(operation: Operation) -> Result<(), String> {
         Operation::List => list_packages(),
 
         Operation::Help => {
-            print_help(Dialect::Native);
+            print_help(dialect);
             Ok(())
         }
     }
