@@ -1,6 +1,8 @@
+mod backend;
+
 use std::{
-    env, io,
-    process::{Command, ExitCode, Stdio},
+    env,
+    process::{Command, ExitCode},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -16,21 +18,30 @@ pub enum Dialect {
 enum Operation {
     Install(Vec<String>),
     Remove(Vec<String>),
+
+    CheckUpdates,
     UpgradeAll,
-    Refresh,
+
     Search(String),
     Info(String),
+
     List,
-    Outdated,
     Help,
 }
 
 pub fn run(dialect: Dialect) -> ExitCode {
     let mut args: Vec<String> = env::args().skip(1).collect();
 
-    // Cargo external subcommands may receive the subcommand name itself
-    // as argv[1]. Strip it if present.
-    let expected = match dialect {
+    /*
+     * Cargo external subcommands can pass the subcommand itself.
+     *
+     * cargo apt upgrade
+     *
+     * may invoke:
+     *
+     * cargo-apt apt upgrade
+     */
+    let subcommand = match dialect {
         Dialect::Native => "pm",
         Dialect::Pacman => "pacman",
         Dialect::Apt => "apt",
@@ -38,24 +49,28 @@ pub fn run(dialect: Dialect) -> ExitCode {
         Dialect::Dnf => "dnf",
     };
 
-    if args.first().map(String::as_str) == Some(expected) {
+    if args.first().map(String::as_str) == Some(subcommand) {
         args.remove(0);
     }
 
     let operation = match parse(dialect, &args) {
-        Ok(op) => op,
-        Err(err) => {
-            eprintln!("error: {err}");
+        Ok(operation) => operation,
+
+        Err(error) => {
+            eprintln!("error: {error}");
             eprintln!();
+
             print_help(dialect);
+
             return ExitCode::from(2);
         }
     };
 
     match execute(operation) {
-        Ok(code) => ExitCode::from(code),
-        Err(err) => {
-            eprintln!("error: {err}");
+        Ok(()) => ExitCode::SUCCESS,
+
+        Err(error) => {
+            eprintln!("error: {error}");
             ExitCode::FAILURE
         }
     }
@@ -78,53 +93,59 @@ fn parse(dialect: Dialect, args: &[String]) -> Result<Operation, String> {
 fn parse_native(args: &[String]) -> Result<Operation, String> {
     match args[0].as_str() {
         "install" | "add" => packages(args, 1, Operation::Install),
+
         "remove" | "uninstall" => packages(args, 1, Operation::Remove),
 
-        "upgrade" | "update-all" => Ok(Operation::UpgradeAll),
-        "update" | "refresh" => Ok(Operation::Refresh),
+        "update" | "check" | "outdated" => Ok(Operation::CheckUpdates),
 
-        "search" => one_arg(args, "search", Operation::Search),
-        "info" | "show" => one_arg(args, "info", Operation::Info),
+        "upgrade" => Ok(Operation::UpgradeAll),
+
+        "search" => argument(args, "search", Operation::Search),
+
+        "info" | "show" => argument(args, "info", Operation::Info),
 
         "list" => Ok(Operation::List),
-        "outdated" => Ok(Operation::Outdated),
 
         "help" | "-h" | "--help" => Ok(Operation::Help),
 
-        other => Err(format!("unknown command '{other}'")),
+        command => Err(format!("unknown command '{command}'")),
     }
 }
 
 fn parse_pacman(args: &[String]) -> Result<Operation, String> {
-    let flag = args[0].as_str();
-
-    match flag {
+    match args[0].as_str() {
         "-Syu" | "-Suy" => Ok(Operation::UpgradeAll),
 
-        "-Sy" => Ok(Operation::Refresh),
+        "-Sy" => Ok(Operation::CheckUpdates),
+
         "-Su" => Ok(Operation::UpgradeAll),
 
         "-S" => packages(args, 1, Operation::Install),
 
-        "-R" | "-Rs" | "-Rns" | "-Rn" => packages(args, 1, Operation::Remove),
+        "-R" | "-Rn" | "-Rs" | "-Rns" => packages(args, 1, Operation::Remove),
 
-        "-Ss" => one_arg(args, "-Ss", Operation::Search),
+        "-Ss" => argument(args, "-Ss", Operation::Search),
 
-        "-Si" | "-Qi" => one_arg(args, flag, Operation::Info),
+        "-Si" | "-Qi" => argument(args, "-Si", Operation::Info),
 
         "-Q" | "-Qe" => Ok(Operation::List),
 
-        "-Qu" => Ok(Operation::Outdated),
+        "-Qu" => Ok(Operation::CheckUpdates),
 
         "-h" | "--help" => Ok(Operation::Help),
 
-        other => Err(format!("unsupported pacman operation '{other}'")),
+        operation => Err(format!("unsupported pacman operation '{operation}'")),
     }
 }
 
 fn parse_apt(args: &[String]) -> Result<Operation, String> {
     match args[0].as_str() {
-        "update" => Ok(Operation::Refresh),
+        /*
+         * Unlike real APT we don't need a permanent local package
+         * database, so "update" means refresh registries and report
+         * available Cargo upgrades.
+         */
+        "update" => Ok(Operation::CheckUpdates),
 
         "upgrade" | "full-upgrade" | "dist-upgrade" => Ok(Operation::UpgradeAll),
 
@@ -132,23 +153,21 @@ fn parse_apt(args: &[String]) -> Result<Operation, String> {
 
         "remove" | "purge" => packages(args, 1, Operation::Remove),
 
-        "search" => one_arg(args, "search", Operation::Search),
+        "search" => argument(args, "search", Operation::Search),
 
-        "show" => one_arg(args, "show", Operation::Info),
+        "show" => argument(args, "show", Operation::Info),
 
         "list" => {
-            if args.len() == 1 || args.iter().any(|arg| arg == "--installed") {
-                Ok(Operation::List)
-            } else if args.iter().any(|arg| arg == "--upgradable") {
-                Ok(Operation::Outdated)
+            if args.iter().any(|argument| argument == "--upgradable") {
+                Ok(Operation::CheckUpdates)
             } else {
-                Err("unsupported apt list option".into())
+                Ok(Operation::List)
             }
         }
 
         "help" | "-h" | "--help" => Ok(Operation::Help),
 
-        other => Err(format!("unsupported apt operation '{other}'")),
+        operation => Err(format!("unsupported apt operation '{operation}'")),
     }
 }
 
@@ -158,25 +177,25 @@ fn parse_pkg(args: &[String]) -> Result<Operation, String> {
 
         "delete" | "remove" => packages(args, 1, Operation::Remove),
 
+        "update" => Ok(Operation::CheckUpdates),
+
         "upgrade" => Ok(Operation::UpgradeAll),
 
-        "update" => Ok(Operation::Refresh),
-
-        "search" => one_arg(args, "search", Operation::Search),
+        "search" => argument(args, "search", Operation::Search),
 
         "info" => {
             if args.len() == 1 {
                 Ok(Operation::List)
             } else {
-                one_arg(args, "info", Operation::Info)
+                argument(args, "info", Operation::Info)
             }
         }
 
-        "version" => Ok(Operation::Outdated),
+        "version" => Ok(Operation::CheckUpdates),
 
         "help" | "-h" | "--help" => Ok(Operation::Help),
 
-        other => Err(format!("unsupported pkg operation '{other}'")),
+        operation => Err(format!("unsupported pkg operation '{operation}'")),
     }
 }
 
@@ -186,17 +205,19 @@ fn parse_dnf(args: &[String]) -> Result<Operation, String> {
 
         "remove" | "erase" => packages(args, 1, Operation::Remove),
 
-        "upgrade" | "update" => Ok(Operation::UpgradeAll),
+        "upgrade" => Ok(Operation::UpgradeAll),
 
-        "makecache" | "check-update" => Ok(Operation::Refresh),
+        "update" => Ok(Operation::UpgradeAll),
 
-        "search" => one_arg(args, "search", Operation::Search),
+        "check-update" | "makecache" => Ok(Operation::CheckUpdates),
 
-        "info" => one_arg(args, "info", Operation::Info),
+        "search" => argument(args, "search", Operation::Search),
+
+        "info" => argument(args, "info", Operation::Info),
 
         "list" => {
-            if args.iter().any(|x| x == "updates") {
-                Ok(Operation::Outdated)
+            if args.iter().any(|argument| argument == "updates") {
+                Ok(Operation::CheckUpdates)
             } else {
                 Ok(Operation::List)
             }
@@ -204,7 +225,7 @@ fn parse_dnf(args: &[String]) -> Result<Operation, String> {
 
         "help" | "-h" | "--help" => Ok(Operation::Help),
 
-        other => Err(format!("unsupported dnf operation '{other}'")),
+        operation => Err(format!("unsupported dnf operation '{operation}'")),
     }
 }
 
@@ -219,13 +240,13 @@ where
         .collect();
 
     if packages.is_empty() {
-        return Err("no packages specified".into());
+        return Err("no packages specified".to_string());
     }
 
     Ok(make(packages))
 }
 
-fn one_arg<F>(args: &[String], command: &str, make: F) -> Result<Operation, String>
+fn argument<F>(args: &[String], command: &str, make: F) -> Result<Operation, String>
 where
     F: FnOnce(String) -> Operation,
 {
@@ -236,96 +257,86 @@ where
     Ok(make(args[1..].join(" ")))
 }
 
-fn execute(operation: Operation) -> io::Result<u8> {
+fn execute(operation: Operation) -> Result<(), String> {
     match operation {
-        Operation::Install(packages) => cargo_with_packages("install", &packages),
+        Operation::Install(packages) => run_package_command("install", &packages),
 
-        Operation::Remove(packages) => cargo_with_packages("uninstall", &packages),
+        Operation::Remove(packages) => run_package_command("uninstall", &packages),
 
-        Operation::UpgradeAll => upgrade_all(),
+        Operation::CheckUpdates => backend::check_updates(),
 
-        Operation::Refresh => refresh(),
+        Operation::UpgradeAll => backend::upgrade_all(),
 
         Operation::Search(query) => run_cargo(&["search", &query]),
 
         Operation::Info(package) => run_cargo(&["info", &package]),
 
-        Operation::List => run_cargo(&["install", "--list"]),
-
-        Operation::Outdated => outdated(),
+        Operation::List => list_packages(),
 
         Operation::Help => {
-            println!("cargo-pkgman");
-            println!("Run the selected frontend with --help.");
-            Ok(0)
+            print_help(Dialect::Native);
+            Ok(())
         }
     }
 }
 
-fn cargo_with_packages(subcommand: &str, packages: &[String]) -> io::Result<u8> {
-    let mut cmd = Command::new("cargo");
+fn run_package_command(command: &str, packages: &[String]) -> Result<(), String> {
+    for package in packages {
+        let status = Command::new("cargo")
+            .arg(command)
+            .arg(package)
+            .status()
+            .map_err(|error| format!("failed to run cargo {command}: {error}"))?;
 
-    cmd.arg(subcommand);
+        if !status.success() {
+            return Err(format!("cargo {command} failed for {package}"));
+        }
+    }
+
+    Ok(())
+}
+
+fn run_cargo(arguments: &[&str]) -> Result<(), String> {
+    let status = Command::new("cargo")
+        .args(arguments)
+        .status()
+        .map_err(|error| format!("failed to run Cargo: {error}"))?;
+
+    if !status.success() {
+        return Err("Cargo command failed".to_string());
+    }
+
+    Ok(())
+}
+
+fn list_packages() -> Result<(), String> {
+    /*
+     * Use cargo-update's parser instead of spawning
+     * `cargo install --list`.
+     */
+    let mut packages = backend::installed_packages()?;
+
+    packages.sort_by(|a, b| a.name.cmp(&b.name));
 
     for package in packages {
-        cmd.arg(package);
+        match package.version {
+            Some(version) => {
+                println!("{} {}", package.name, version);
+            }
+
+            None => {
+                println!("{}", package.name);
+            }
+        }
     }
 
-    status_code(cmd.status()?)
-}
-
-fn run_cargo(args: &[&str]) -> io::Result<u8> {
-    let status = Command::new("cargo").args(args).status()?;
-
-    status_code(status)
-}
-
-fn upgrade_all() -> io::Result<u8> {
-    println!(":: Checking Cargo-installed packages for upgrades...");
-
-    let status = Command::new("cargo")
-        .args(["install-update", "-a"])
-        .status()?;
-
-    status_code(status)
-}
-
-fn outdated() -> io::Result<u8> {
-    let status = Command::new("cargo")
-        .args(["install-update", "-a", "-l"])
-        .status()?;
-
-    status_code(status)
-}
-
-fn refresh() -> io::Result<u8> {
-    // Modern Cargo's sparse registry is fetched on demand, so there isn't
-    // really an apt-style package-list database that needs refreshing.
-    //
-    // Probe crates.io quietly to make the operation useful.
-    println!(":: Checking Cargo registry...");
-
-    let status = Command::new("cargo")
-        .args(["search", "cargo-pkgman", "--limit", "1"])
-        .stdout(Stdio::null())
-        .status()?;
-
-    if status.success() {
-        println!(":: Registry is reachable.");
-    }
-
-    status_code(status)
-}
-
-fn status_code(status: std::process::ExitStatus) -> io::Result<u8> {
-    Ok(status.code().unwrap_or(1).clamp(0, 255) as u8)
+    Ok(())
 }
 
 fn print_help(dialect: Dialect) {
     match dialect {
-        Dialect::Native => {
-            println!(
-                r#"cargo pm - Cargo application package manager
+        Dialect::Native => println!(
+            r#"cargo pm - package manager for Cargo applications
 
 Usage:
   cargo pm install <package...>
@@ -334,33 +345,26 @@ Usage:
   cargo pm upgrade
   cargo pm search <query>
   cargo pm info <package>
-  cargo pm list
-  cargo pm outdated"#
-            );
-        }
+  cargo pm list"#
+        ),
 
-        Dialect::Pacman => {
-            println!(
-                r#"cargo pacman - pacman-style Cargo package management
+        Dialect::Pacman => println!(
+            r#"cargo pacman
 
-Usage:
-  cargo pacman -S <package...>    Install
-  cargo pacman -R <package...>    Remove
-  cargo pacman -Sy                Refresh registry
-  cargo pacman -Su                Upgrade
-  cargo pacman -Syu               Refresh + upgrade
-  cargo pacman -Ss <query>        Search
-  cargo pacman -Si <package>      Package info
-  cargo pacman -Q                 Installed packages
-  cargo pacman -Qu                Available upgrades"#
-            );
-        }
+  cargo pacman -S <package...>
+  cargo pacman -R <package...>
+  cargo pacman -Sy
+  cargo pacman -Su
+  cargo pacman -Syu
+  cargo pacman -Ss <query>
+  cargo pacman -Si <package>
+  cargo pacman -Q
+  cargo pacman -Qu"#
+        ),
 
-        Dialect::Apt => {
-            println!(
-                r#"cargo apt - APT-style Cargo package management
+        Dialect::Apt => println!(
+            r#"cargo apt
 
-Usage:
   cargo apt update
   cargo apt upgrade
   cargo apt install <package...>
@@ -369,14 +373,11 @@ Usage:
   cargo apt show <package>
   cargo apt list --installed
   cargo apt list --upgradable"#
-            );
-        }
+        ),
 
-        Dialect::Pkg => {
-            println!(
-                r#"cargo pkg - FreeBSD pkg-style Cargo package management
+        Dialect::Pkg => println!(
+            r#"cargo pkg
 
-Usage:
   cargo pkg update
   cargo pkg upgrade
   cargo pkg install <package...>
@@ -384,14 +385,12 @@ Usage:
   cargo pkg search <query>
   cargo pkg info [package]
   cargo pkg version"#
-            );
-        }
+        ),
 
-        Dialect::Dnf => {
-            println!(
-                r#"cargo dnf - DNF-style Cargo package management
+        Dialect::Dnf => println!(
+            r#"cargo dnf
 
-Usage:
+  cargo dnf check-update
   cargo dnf upgrade
   cargo dnf install <package...>
   cargo dnf remove <package...>
@@ -399,7 +398,6 @@ Usage:
   cargo dnf info <package>
   cargo dnf list installed
   cargo dnf list updates"#
-            );
-        }
+        ),
     }
 }
