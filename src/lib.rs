@@ -1,6 +1,5 @@
 use std::{
-    env,
-    io,
+    env, io,
     process::{Command, ExitCode, Stdio},
 };
 
@@ -107,9 +106,7 @@ fn parse_pacman(args: &[String]) -> Result<Operation, String> {
 
         "-S" => packages(args, 1, Operation::Install),
 
-        "-R" | "-Rs" | "-Rns" | "-Rn" => {
-            packages(args, 1, Operation::Remove)
-        }
+        "-R" | "-Rs" | "-Rns" | "-Rn" => packages(args, 1, Operation::Remove),
 
         "-Ss" => one_arg(args, "-Ss", Operation::Search),
 
@@ -129,15 +126,11 @@ fn parse_apt(args: &[String]) -> Result<Operation, String> {
     match args[0].as_str() {
         "update" => Ok(Operation::Refresh),
 
-        "upgrade" | "full-upgrade" | "dist-upgrade" => {
-            Ok(Operation::UpgradeAll)
-        }
+        "upgrade" | "full-upgrade" | "dist-upgrade" => Ok(Operation::UpgradeAll),
 
         "install" => packages(args, 1, Operation::Install),
 
-        "remove" | "purge" => {
-            packages(args, 1, Operation::Remove)
-        }
+        "remove" | "purge" => packages(args, 1, Operation::Remove),
 
         "search" => one_arg(args, "search", Operation::Search),
 
@@ -215,11 +208,7 @@ fn parse_dnf(args: &[String]) -> Result<Operation, String> {
     }
 }
 
-fn packages<F>(
-    args: &[String],
-    start: usize,
-    make: F,
-) -> Result<Operation, String>
+fn packages<F>(args: &[String], start: usize, make: F) -> Result<Operation, String>
 where
     F: FnOnce(Vec<String>) -> Operation,
 {
@@ -236,11 +225,7 @@ where
     Ok(make(packages))
 }
 
-fn one_arg<F>(
-    args: &[String],
-    command: &str,
-    make: F,
-) -> Result<Operation, String>
+fn one_arg<F>(args: &[String], command: &str, make: F) -> Result<Operation, String>
 where
     F: FnOnce(String) -> Operation,
 {
@@ -253,29 +238,19 @@ where
 
 fn execute(operation: Operation) -> io::Result<u8> {
     match operation {
-        Operation::Install(packages) => {
-            cargo_with_packages("install", &packages)
-        }
+        Operation::Install(packages) => cargo_with_packages("install", &packages),
 
-        Operation::Remove(packages) => {
-            cargo_with_packages("uninstall", &packages)
-        }
+        Operation::Remove(packages) => cargo_with_packages("uninstall", &packages),
 
         Operation::UpgradeAll => upgrade_all(),
 
         Operation::Refresh => refresh(),
 
-        Operation::Search(query) => {
-            run_cargo(&["search", &query])
-        }
+        Operation::Search(query) => run_cargo(&["search", &query]),
 
-        Operation::Info(package) => {
-            run_cargo(&["info", &package])
-        }
+        Operation::Info(package) => run_cargo(&["info", &package]),
 
-        Operation::List => {
-            run_cargo(&["install", "--list"])
-        }
+        Operation::List => run_cargo(&["install", "--list"]),
 
         Operation::Outdated => outdated(),
 
@@ -287,10 +262,7 @@ fn execute(operation: Operation) -> io::Result<u8> {
     }
 }
 
-fn cargo_with_packages(
-    subcommand: &str,
-    packages: &[String],
-) -> io::Result<u8> {
+fn cargo_with_packages(subcommand: &str, packages: &[String]) -> io::Result<u8> {
     let mut cmd = Command::new("cargo");
 
     cmd.arg(subcommand);
@@ -303,9 +275,7 @@ fn cargo_with_packages(
 }
 
 fn run_cargo(args: &[&str]) -> io::Result<u8> {
-    let status = Command::new("cargo")
-        .args(args)
-        .status()?;
+    let status = Command::new("cargo").args(args).status()?;
 
     status_code(status)
 }
@@ -336,12 +306,7 @@ fn refresh() -> io::Result<u8> {
     println!(":: Checking Cargo registry...");
 
     let status = Command::new("cargo")
-        .args([
-            "search",
-            "cargo-pkgman",
-            "--limit",
-            "1",
-        ])
+        .args(["search", "cargo-pkgman", "--limit", "1"])
         .stdout(Stdio::null())
         .status()?;
 
@@ -360,7 +325,7 @@ fn print_help(dialect: Dialect) {
     match dialect {
         Dialect::Native => {
             println!(
-r#"cargo pm - Cargo application package manager
+                r#"cargo pm - Cargo application package manager
 
 Usage:
   cargo pm install <package...>
@@ -376,7 +341,7 @@ Usage:
 
         Dialect::Pacman => {
             println!(
-r#"cargo pacman - pacman-style Cargo package management
+                r#"cargo pacman - pacman-style Cargo package management
 
 Usage:
   cargo pacman -S <package...>    Install
@@ -393,7 +358,7 @@ Usage:
 
         Dialect::Apt => {
             println!(
-r#"cargo apt - APT-style Cargo package management
+                r#"cargo apt - APT-style Cargo package management
 
 Usage:
   cargo apt update
@@ -409,7 +374,7 @@ Usage:
 
         Dialect::Pkg => {
             println!(
-r#"cargo pkg - FreeBSD pkg-style Cargo package management
+                r#"cargo pkg - FreeBSD pkg-style Cargo package management
 
 Usage:
   cargo pkg update
@@ -424,7 +389,7 @@ Usage:
 
         Dialect::Dnf => {
             println!(
-r#"cargo dnf - DNF-style Cargo package management
+                r#"cargo dnf - DNF-style Cargo package management
 
 Usage:
   cargo dnf upgrade

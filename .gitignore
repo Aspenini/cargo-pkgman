@@ -1,9 +1,6 @@
 ```gitignore
 /target/
 
-# Rust tooling
-Cargo.lock
-
 # IDEs / editors
 .vscode/
 .idea/
