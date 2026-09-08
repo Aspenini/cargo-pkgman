@@ -1,6 +1,6 @@
 # cargo-pkgman
 
-Package-manager style commands for Cargo-installed applications.
+Package-manager style commands for Cargo-installed programs.
 
 Use familiar package manager syntax with Cargo:
 
