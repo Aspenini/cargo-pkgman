@@ -1,22 +1,31 @@
 [package]
 name = "cargo-pkgman"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.86"
 description = "Package-manager style frontends for Cargo-installed applications"
 license = "MIT"
 repository = "https://github.com/Aspenini/cargo-pkgman"
+readme = "README.md"
+keywords = ["cargo", "package-manager", "pacman", "apt", "dnf"]
+categories = ["command-line-utilities", "development-tools::cargo-plugins"]
 
 [dependencies]
-home = "0.5"
 semver = "1"
 serde_json = "1"
 toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
 ureq = "3"
 
+[dev-dependencies]
+tempfile = "3"
+
 # The shared executable. Every frontend below is a launcher that
 # re-invokes this one with `--frontend <name>`, so the package
 # management logic and its dependencies are linked exactly once.
+[lib]
+name = "cargo_pkgman"
+path = "src/lib.rs"
+
 [[bin]]
 name = "cargo-pkgman"
 path = "src/main.rs"
@@ -32,10 +41,6 @@ path = "src/bin/cargo-pacman.rs"
 [[bin]]
 name = "cargo-apt"
 path = "src/bin/cargo-apt.rs"
-
-[[bin]]
-name = "cargo-pkg"
-path = "src/bin/cargo-pkg.rs"
 
 [[bin]]
 name = "cargo-dnf"
